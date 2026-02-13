@@ -2,12 +2,15 @@ import requests
 import pandas as pd
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
 
 # =====================
 # CONFIG
 # =====================
-API_KEY = "AWNhSg6SiAQecnYzkTNl2jQSNZyQdmda"
+
+# Lấy API key từ GitHub Secret
+API_KEY = os.getenv("API_KEY")
 
 # Khu vực Hà Nội (ước lượng)
 MIN_LAT = 20.95
@@ -38,46 +41,57 @@ def generate_grid(min_lat, max_lat, min_lon, max_lon, step):
 # GET TRAFFIC DATA
 # =====================
 def get_traffic(lat, lon):
+
+    if not API_KEY:
+        print("API_KEY not found!")
+        return None
+
     url = (
         "https://api.tomtom.com/traffic/services/4/flowSegmentData/"
         f"relative0/10/json?key={API_KEY}&point={lat},{lon}"
     )
 
-    r = requests.get(url, timeout=10)
-    if r.status_code != 200:
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return None
+
+        data = r.json().get("flowSegmentData")
+        if not data:
+            return None
+
+        current = data.get("currentSpeed")
+        free = data.get("freeFlowSpeed")
+
+        if not current or not free or free == 0:
+            return None
+
+        congestion_ratio = round(current / free, 2)
+        traffic_density = round(1 - congestion_ratio, 2)
+
+        # ✅ Giờ Việt Nam
+        now = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
+
+        return {
+            "date": now.strftime("%Y-%m-%d"),
+            "hour": f"{now.hour:02d}:00",
+            "lat": lat,
+            "lon": lon,
+            "currentSpeed": current,
+            "freeFlowSpeed": free,
+            "congestion_ratio": congestion_ratio,
+            "traffic_density": traffic_density
+        }
+
+    except Exception as e:
+        print("Error:", e)
         return None
-
-    data = r.json().get("flowSegmentData")
-    if not data:
-        return None
-
-    current = data.get("currentSpeed")
-    free = data.get("freeFlowSpeed")
-
-    if not current or not free or free == 0:
-        return None
-
-    congestion_ratio = round(current / free, 2)
-    traffic_density = round(1 - congestion_ratio, 2)
-
-    now = datetime.now()
-
-    return {
-        "date": now.strftime("%Y-%m-%d"),
-        "hour": f"{now.hour:02d}:00",
-        "lat": lat,
-        "lon": lon,
-        "currentSpeed": current,
-        "freeFlowSpeed": free,
-        "congestion_ratio": congestion_ratio,
-        "traffic_density": traffic_density
-    }
 
 # =====================
 # MAIN
 # =====================
 def main():
-    print("Collecting hourly traffic data...")
+    print("Collecting hourly traffic data (Vietnam time)...")
 
     points = generate_grid(
         MIN_LAT, MAX_LAT,
